@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>แบบฟอร์มออนไลน์</title>
+<style>
+:root{--ink:#0d2b33;--mute:#5d747c;--brand:#0b6e79;--brand-d:#084f58;--line:#dbe4e7;--bg:#f3f6f7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'TH Sarabun New','Sarabun','Noto Sans Thai','Leelawadee UI','Tahoma',sans-serif;font-size:18px;line-height:1.5}
+header{background:var(--ink);color:#fff;padding:34px 20px 40px}
+.in{max-width:1040px;margin:0 auto}
+header small{color:#8fb0b8;font-size:16px}
+h1{margin:4px 0 6px;font-size:clamp(28px,4vw,40px);line-height:1.2}
+header p{margin:0;color:#cfe0e4;max-width:60ch}
+main{max-width:1040px;margin:-22px auto 60px;padding:0 20px}
+.search{width:100%;border:1px solid #c5d3d7;border-radius:14px;padding:14px 18px;font:inherit;box-shadow:0 6px 20px rgba(13,43,51,.12);min-height:52px}
+.search:focus-visible,a:focus-visible,button:focus-visible{outline:3px solid #46b3be;outline-offset:2px}
+h2{font-size:20px;margin:30px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:6px}
+.card:hover{border-color:#8fb0b8}
+.card h3{margin:0;font-size:19px;line-height:1.3}
+.card p{margin:0;color:var(--mute);font-size:16px;flex:1}
+.row{display:flex;gap:8px;margin-top:10px}
+.open{flex:1;text-align:center;background:var(--brand);color:#fff;text-decoration:none;border-radius:10px;padding:9px 12px;font-weight:700}
+.open:hover{background:var(--brand-d)}
+.copy{border:1px solid #b7c9ce;background:#fff;border-radius:10px;padding:9px 12px;font:inherit;cursor:pointer}
+.copy:hover{background:var(--bg)}
+.empty{color:var(--mute);margin-top:24px}
+footer{max-width:1040px;margin:0 auto;padding:0 20px 40px;color:var(--mute);font-size:15px}
+</style>
+</head>
+<body>
+<header><div class="in"><small id="unit"></small><h1 id="title">แบบฟอร์มออนไลน์</h1>
+<p>เลือกแบบฟอร์ม กรอกข้อมูลบนหน้าจอ แล้วพิมพ์ออกมาตามแบบกระดาษจริง เพื่อลงนามและเสนอตามสายบังคับบัญชา</p></div></header>
+<main>
+  <input class="search" id="q" type="search" placeholder="ค้นหาแบบฟอร์ม เช่น ลากิจ ลาป่วย" aria-label="ค้นหาแบบฟอร์ม" autocomplete="off">
+  <div id="list"></div>
+  <p class="empty" id="empty" hidden>ไม่พบแบบฟอร์มที่ค้นหา</p>
+</main>
+<footer>ข้อมูลที่กรอกอยู่ในเครื่องของท่านเท่านั้น ไม่ถูกส่งหรือเก็บไว้ที่เซิร์ฟเวอร์ · ตั้งค่า "พิมพ์ขนาด 100%" บนกระดาษ A4 เพื่อให้ตรงตามแบบ</footer>
+<script src="config.js"></script>
+<script src="data/forms.js"></script>
+<script>
+const CFG=window.PORTAL_CONFIG||{},FORMS=window.FORMS_DATA||[];
+if(CFG.title){document.getElementById('title').textContent=CFG.title;document.title=CFG.title}
+document.getElementById('unit').textContent=CFG.unit||'';
+const list=document.getElementById('list'),empty=document.getElementById('empty');
+function url(slug){return new URL('form.html?f='+encodeURIComponent(slug),location.href).href}
+function render(q){
+  list.innerHTML='';const groups={};let n=0;
+  FORMS.forEach(f=>{
+    if(q&&!(f.title+' '+f.desc+' '+f.group).toLowerCase().includes(q))return;
+    (groups[f.group||'อื่นๆ']=groups[f.group||'อื่นๆ']||[]).push(f);n++;
+  });
+  Object.entries(groups).forEach(([g,items])=>{
+    const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='grid';
+    items.forEach(f=>{
+      const c=document.createElement('div');c.className='card';
+      c.innerHTML='<h3></h3><p></p><div class="row"><a class="open">เปิดแบบฟอร์ม</a><button class="copy" type="button">คัดลอกลิงก์</button></div>';
+      c.querySelector('h3').textContent=f.title;c.querySelector('p').textContent=f.desc||'';
+      c.querySelector('.open').href='form.html?f='+encodeURIComponent(f.slug);
+      const b=c.querySelector('.copy');
+      b.onclick=()=>{const u=url(f.slug);
+        (navigator.clipboard?navigator.clipboard.writeText(u):Promise.reject()).then(()=>{b.textContent='คัดลอกแล้ว'},()=>{prompt('คัดลอกลิงก์นี้',u)});
+        setTimeout(()=>b.textContent='คัดลอกลิงก์',1800)};
+      grid.append(c);
+    });
+    list.append(h,grid);
+  });
+  empty.hidden=n>0;
+}
+document.getElementById('q').addEventListener('input',e=>render(e.target.value.trim().toLowerCase()));
+render('');
+</script>
+</body>
+</html>
