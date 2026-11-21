@@ -1,0 +1,368 @@
+"""แปลงหน้าแบบฟอร์ม PDF เป็นข้อมูลสำหรับพอร์ทัลแบบฟอร์มออนไลน์
+ต้องใช้: Python 3 และ  pip install pdfplumber
+ตัวอย่าง: python pdf2form.py add แบบฟอร์ม.pdf --pages 1 --slug my-form --title "ชื่อฟอร์ม"
+"""
+import pdfplumber, json, re, statistics, collections, os
+
+SP = 3.456
+DOTS = set('.…')
+COMB = lambda ch: len(ch) == 1 and (ch == '\u0e31' or '\u0e34' <= ch <= '\u0e3a' or '\u0e47' <= ch <= '\u0e4e')
+MEMO = re.compile(r'^[ก-ฮ]\.[ก-ฮ]\.[๐-๙]{2}$')
+
+def clusters(vals, tol):
+    out = []
+    for v in sorted(vals):
+        if out and v - out[-1][-1] <= tol: out[-1].append(v)
+        else: out.append([v])
+    return out
+
+def page_model(pg):
+    allc = [c for c in pg.chars if c['text'] != ' ']
+    cnt = collections.Counter(round(c['size']) for c in allc if c['text'] not in '.…_' and 'Wingdings' not in c['fontname'])
+    base = cnt.most_common(1)[0][0] if cnt else 16
+    deco, tiny, boxes, seen = [], [], [], set()
+    def add(key, item):
+        if key not in seen: seen.add(key); deco.append(item)
+    for r in pg.rects:
+        w = r['x1'] - r['x0']; h = r['bottom'] - r['top']
+        if w < 2.6 and h < 1.2: tiny.append(r)
+        elif h < 1.6 and w >= 2.6: add(('h', round(r['x0']), round(r['top'])), ['h', round(r['x0'], 1), round(r['top'], 1), round(w, 1)])
+        elif w < 1.6 and h >= 2.6: add(('v', round(r['x0']), round(r['top'])), ['v', round(r['x0'], 1), round(r['top'], 1), round(h, 1)])
+        elif 8 <= w <= 18 and 8 <= h <= 18 and abs(w - h) <= 2.5:
+            k = (round(r['x0']), round(r['top']))
+            if ('b',) + k not in seen: seen.add(('b',) + k); boxes.append((r['x0'], r['x1'], r['top'], r['bottom']))
+        elif (w >= 19 or h >= 19) and r.get('stroke') and not r.get('fill'):
+            add(('r', round(r['x0']), round(r['top']), round(w)), ['r', round(r['x0'], 1), round(r['top'], 1), round(w, 1), round(h, 1)])
+    dashed = []
+    for l in pg.lines:
+        if abs(l['bottom'] - l['top']) < 1 and l.get('dash'): dashed.append([l['x0'], l['x1'], l['top']])
+        elif abs(l['bottom'] - l['top']) < 1: add(('h', round(l['x0']), round(l['top'])), ['h', round(l['x0'], 1), round(l['top'], 1), round(l['x1'] - l['x0'], 1)])
+        elif abs(l['x1'] - l['x0']) < 1: add(('v', round(l['x0']), round(l['top'])), ['v', round(l['x0'], 1), round(l['top'], 1), round(l['bottom'] - l['top'], 1)])
+    # dotted underlines (tiny dot rectangles or dashed lines) -> spans
+    spans, byy = list(dashed), {}
+    for r in tiny: byy.setdefault(round(r['top'], 1), []).append(r)
+    for y, rs in byy.items():
+        rs.sort(key=lambda r: r['x0']); cur = None
+        for r in rs:
+            if cur and r['x0'] - cur[1] < 2.2: cur[1] = r['x1']
+            else:
+                if cur: spans.append(cur)
+                cur = [r['x0'], r['x1'], y]
+        if cur: spans.append(cur)
+    spans = [sp for sp in spans if sp in dashed or sp[1] - sp[0] >= 8]
+    # character lines (cluster by bottom edge so mixed font sizes share a line)
+    cl = clusters([round(c['bottom'], 1) for c in allc], 3.0)
+    lines = [{'atoms': [], 'cb': statistics.mean(g)} for g in cl]
+    nearest = lambda b: min(range(len(lines)), key=lambda i: abs(lines[i]['cb'] - b)) if lines else -1
+    for c in allc:
+        k = 'K' if ('Wingdings' in c['fontname'] and c['text'] not in ('✓', '\uf0fc')) else 'c'
+        lines[nearest(c['bottom'])]['atoms'].append((k, c['x0'], c['x1'], c['text'], c['fontname'], c['top'], False, round(c['size'], 1)))
+    def dom(L):
+        sz = collections.Counter(a[7] for a in L['atoms'] if a[0] == 'c' and a[3] not in DOTS and a[3] != '_')
+        return sz.most_common(1)[0][0] if sz else base
+    for L in lines: L['z'] = dom(L)
+    # offset of dotted underline below the text bottom
+    ds = []
+    for x0, x1, y in spans:
+        i = nearest(y + 1.7)
+        if i >= 0 and abs(lines[i]['cb'] - (y + 1.7)) < 4: ds.append(lines[i]['cb'] - y)
+    Db = statistics.median(ds) if ds else 1.7
+    for x0, x1, y in spans:
+        b = y + Db; i = nearest(b)
+        if i >= 0 and abs(lines[i]['cb'] - b) < 3.5: lines[i]['atoms'].append(('B', x0, x1, '', '', y, False, 0))
+        else: lines.append({'atoms': [('B', x0, x1, '', '', y, False, 0)], 'cb': b, 'z': base})
+    for x0, x1, top, bot in boxes:
+        cy = (top + bot) / 2
+        best = min(range(len(lines)), key=lambda i: abs(lines[i]['cb'] - lines[i]['z'] * 0.35 - cy), default=-1)
+        if best >= 0 and abs(lines[best]['cb'] - lines[best]['z'] * 0.35 - cy) < 8:
+            lines[best]['atoms'].append(('K', x0, x1, '\u25a1', 'rect', top, False, round(x1 - x0, 1)))
+        else:
+            lines.append({'atoms': [('K', x0, x1, '\u25a1', 'rect', top, False, round(x1 - x0, 1))], 'cb': bot + lines[0]['z'] * 0.2 if lines else bot, 'z': base})
+    lines.sort(key=lambda l: l['cb'])
+    out = []
+    for L in lines:
+        z = L['z']
+        base_atoms = [a for a in L['atoms'] if a[0] != 'B']
+        bspans = [a for a in L['atoms'] if a[0] == 'B']
+        # (1) typed text drawn over leader dots (different baseline)
+        dots = [a for a in base_atoms if a[3] in DOTS and a[0] == 'c']
+        if len(dots) >= 4:
+            tt = [round(a[5], 1) for a in dots]; dt = max(set(tt), key=tt.count)
+            leader = [a for a in dots if abs(a[5] - dt) <= 0.3]
+            if len(leader) >= 4:
+                lx0 = min(a[1] for a in leader); lx1 = max(a[2] for a in leader)
+                ovs = [a for a in base_atoms if a not in leader and a[0] == 'c' and abs(a[5] - dt) >= 0.5 and lx0 - 2 <= (a[1] + a[2]) / 2 <= lx1 + 2]
+                if ovs:
+                    ox0 = min(a[1] for a in ovs); ox1 = max(a[2] for a in ovs); ids = set(id(a) for a in ovs)
+                    base_atoms = [(a[:6] + (True,) + a[7:]) if id(a) in ids else a for a in base_atoms
+                                  if not (a in leader and ox0 - 1.5 <= (a[1] + a[2]) / 2 <= ox1 + 1.5)]
+        # (2) dotted underline that already carries typed text -> keep as a decoration, make the text editable
+        keepB = []
+        for b in bspans:
+            sx0, sx1 = b[1], b[2]
+            cov = [a for a in base_atoms if a[0] == 'c' and a[3] not in DOTS and a[3] != '_' and sx0 - 0.5 <= (a[1] + a[2]) / 2 <= sx1 + 0.5]
+            if cov:
+                deco.append(['d', round(sx0, 1), round(b[5], 1), round(sx1 - sx0, 1)])
+                tag = ('S', sx0, sx1)
+                reg = [a for a in cov if 'Bold' not in a[4]]
+                if reg:
+                    lo = min(a[1] for a in reg); hi = max(a[2] for a in reg)
+                    cid = set(id(a) for a in base_atoms if a[0] == 'c' and 'Bold' not in a[4] and lo - 0.5 <= (a[1] + a[2]) / 2 <= hi + 0.5)
+                else: cid = set()
+                base_atoms = [(a[:6] + (tag,) + a[7:]) if id(a) in cid else a for a in base_atoms]
+            else: keepB.append(b)
+        groups = []
+        for a in base_atoms:
+            if COMB(a[3]) and groups: groups[-1].append(a)
+            else: groups.append([a])
+        groups.sort(key=lambda g: g[0][1])
+        flat = [a for g in groups for a in g]
+        bs = sorted(keepB, key=lambda a: a[1]); atoms = []
+        for a in flat:
+            while bs and bs[0][1] <= a[1] and not COMB(a[3]): atoms.append(bs.pop(0))
+            atoms.append(a)
+        atoms += bs
+        if not atoms: continue
+        segs, state = [], {'text': '', 'st': None}
+        def flush():
+            if state['text']:
+                s, b = state['st']
+                segs.append(['t', state['text'], 0 if abs(s - z) < 0.6 else s, 1 if b else 0]); state['text'] = ''
+        def addtext(t, st):
+            if state['text'] and state['st'] != st: flush()
+            state['st'] = st; state['text'] += t
+        prev = None; xmax = max(a[2] for a in atoms); i = 0
+        while i < len(atoms):
+            k, x0, x1, ch, fn, top, ov, sz = atoms[i]
+            gap = (x0 - prev) if prev is not None else 0
+            if ov is True:
+                flush(); j = i; vt = ''; pv = None
+                while j < len(atoms) and atoms[j][6] is True:
+                    aa = atoms[j]
+                    if pv is not None and not COMB(aa[3]) and aa[1] - pv >= 2.0: vt += ' ' * max(1, round((aa[1] - pv) / SP))
+                    vt += aa[3]
+                    if not COMB(aa[3]): pv = aa[2]
+                    j += 1
+                if pv is None: pv = atoms[j - 1][2]
+                segs.append(['v', vt, round(pv - x0, 1)]); prev = pv; i = j; continue
+            if isinstance(ov, tuple):
+                flush(); j = i; vt = ''; pv = None; sx1 = ov[2]
+                while j < len(atoms) and atoms[j][6] == ov:
+                    aa = atoms[j]
+                    if pv is not None and not COMB(aa[3]) and aa[1] - pv >= 2.0: vt += ' ' * max(1, round((aa[1] - pv) / SP))
+                    vt += aa[3]
+                    if not COMB(aa[3]): pv = aa[2]
+                    j += 1
+                if pv is None: pv = atoms[j - 1][2]
+                left = prev if prev is not None else x0
+                nxt = atoms[j] if j < len(atoms) else None
+                right = nxt[1] if (nxt and nxt[0] != 'B' and nxt[1] < sx1 + 1) else sx1
+                right = max(right, pv)
+                if MEMO.match(vt.strip()): segs.append(['f', round(pv - left, 1), 'm:' + vt.strip()]); prev = pv
+                else: segs.append(['f', round(right - left, 1), 'o:' + vt.strip()]); prev = right
+                xmax = max(xmax, prev); i = j; continue
+            if k == 'B':
+                flush(); segs.append(['f', round(x1 - x0, 1), 'u']); prev = x1; i += 1; continue
+            if k == 'K':
+                flush()
+                if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
+                elif prev is not None and gap >= 2.0 and segs and segs[-1][0] == 't': segs[-1][1] += ' ' * max(1, round(gap / SP))
+                segs.append(['c', round(x1 - x0, 1)]); prev = x1; i += 1; continue
+            if ch in DOTS or ch == '_':
+                j = i; rx1 = x1
+                while j + 1 < len(atoms) and atoms[j + 1][3] == ch and atoms[j + 1][6] is False and atoms[j + 1][1] - rx1 <= 4.6:
+                    j += 1; rx1 = atoms[j][2]
+                n = j - i + 1
+                if ch == '_':
+                    flush()
+                    if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
+                    segs.append(['r', round(rx1 - x0, 1)]); prev = rx1; i = j + 1; continue
+                if n >= 4:
+                    flush()
+                    if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
+                    segs.append(['f', round(rx1 - x0, 1), 'd']); prev = rx1; i = j + 1; continue
+            if COMB(ch):
+                addtext(ch, state['st'] or (sz, 'Bold' in fn)); i += 1; continue
+            st = (sz, 'Bold' in fn)
+            if prev is not None:
+                if gap > 14: flush(); segs.append(['g', round(gap, 1)])
+                elif gap >= 2.0: addtext(' ' * max(1, round(gap / SP)), state['st'] or st)
+            addtext(ch, st); prev = x1; i += 1
+        flush()
+        if not segs: continue
+        x0 = atoms[0][1]
+        main = [a for a in atoms if a[0] == 'c' and abs(a[7] - z) < 0.6 and a[3] not in DOTS]
+        ytop = statistics.mean(a[5] for a in main) if main else L['cb'] - z
+        out.append({'x': round(x0, 1), 'y': round(ytop, 1), 'w': round(xmax - x0, 1), 'z': z, 's': segs})
+    images = [{'x': round(im['x0'], 1), 'y': round(im['top'], 1), 'w': round(im['width'], 1), 'h': round(im['height'], 1)} for im in pg.images]
+    return out, deco, images
+
+
+def build_fields(lines, pref):
+    norm = lambda t: re.sub(r'[.\s]', '', t)
+    for l in lines:
+        for sg in l['s']:
+            if sg[0] == 't': sg[1] = re.sub(r'พ\.ศ(?!\.)', 'พ.ศ.', sg[1])
+        if any(s[0] == 't' and 'ทำเครื่องหมาย' in s[1] for s in l['s']):
+            l['s'] = [['t', '\u2610', 0, 0] if s[0] == 'c' else s for s in l['s']]
+    ysplit = next((l['y'] for l in lines if any(s[0] == 't' and ('ควรมิควรแล้วแต่จะกรุณา' in s[1] or 'จึงเรียนมา' in s[1]) for s in l['s'])), 9999)
+    # typed text over leader dots -> one field with a default value
+    for l in lines:
+        s_ = l['s']; i = 0
+        while i < len(s_):
+            if s_[i][0] == 'v':
+                lo = hi = i; w = s_[i][2]
+                if lo > 0 and s_[lo - 1][0] == 'f': lo -= 1; w += s_[lo][1]
+                if hi + 1 < len(s_) and s_[hi + 1][0] == 'f': hi += 1; w += s_[hi][1]
+                if hi + 1 < len(s_) and s_[hi + 1][0] == 't' and not s_[hi + 1][1].strip(' .'): hi += 1
+                val = re.sub(r'^ผบ\s*บน\s*๕$', 'ผบ.บน.๕', s_[i][1])
+                s_[lo:hi + 1] = [['f', round(w, 1), 'd:' + val]]; i = lo + 1
+            else: i += 1
+    toks = [(li, si) for li, l in enumerate(lines) for si, _ in enumerate(l['s'])]
+    S = lambda k: lines[toks[k][0]]['s'][toks[k][1]]
+    N = len(toks); fields = []; n = 0; used = set(); dategroups = 0
+    def label_before(k):
+        j = k - 1
+        while j >= 0:
+            sg = S(j)
+            if sg[0] == 't' and norm(sg[1]): return sg[1].strip(' .')
+            j -= 1
+        return ''
+    def text_after(k):
+        j = k + 1
+        while j < N:
+            sg = S(j)
+            if sg[0] == 't' and norm(sg[1]): return sg[1].strip(' .')
+            if sg[0] in 'fc': return ''
+            j += 1
+        return ''
+    isT = lambda x, w: x < N and S(x)[0] == 't' and norm(S(x)[1]) == w
+    isF = lambda x: x < N and S(x)[0] == 'f' and len(S(x)) < 5
+    k = 0
+    while k < N:
+        sg = S(k); li = toks[k][0]; sec = 1 if lines[li]['y'] > ysplit else 0
+        if isF(k) and isT(k + 1, 'เดือน') and isF(k + 2) and isT(k + 3, 'พศ') and isF(k + 4):
+            lab = label_before(k); fid = 'd%d' % n; n += 1
+            for part, kk in zip('dmy', (k, k + 2, k + 4)): S(kk).extend([fid, part])
+            key = None
+            if not re.search(r'ตั้งแต่|ถึง|เมื่อ|เกิด|กลับ', lab) and 'docdate' not in used and lab.endswith('วันที่') and not any(x in lab for x in ('ในวันที่',)) and dategroups == 0: key = 'docdate'
+            elif 'ตั้งแต่' in lab and 'start' not in used: key = 'start'
+            elif 'ถึง' in lab and 'end' not in used and 'start' in used: key = 'end'
+            elif 'กลับ' in lab and 'back' not in used: key = 'back'
+            elif 'ในวันที่' in lab and 'go' not in used: key = 'go'
+            elif 'คลอดบุตรเมื่อ' in lab: key = 'birth'
+            elif lab.endswith('วันที่') and 'docdate' not in used and 'ตั้งแต่' not in lab: key = 'docdate'
+            dategroups += 1
+            if key: used.add(key)
+            fields.append({'id': fid, 'type': 'date', 'label': lab[-30:] or 'วันที่', 'key': key, 'sec': sec}); k += 5; continue
+        if isF(k) and isT(k + 1, '/') and isF(k + 2) and isT(k + 3, '/') and isF(k + 4):
+            fid = 'd%d' % n; n += 1
+            for part, kk in zip(('dn', 'mn', 'y'), (k, k + 2, k + 4)): S(kk).extend([fid, part])
+            fields.append({'id': fid, 'type': 'date', 'label': (label_before(k)[-30:] or 'วันที่ลงความเห็น'), 'key': None, 'sec': sec, 'short': True}); k += 5; continue
+        if isF(k):
+            lab = label_before(k); fid = 'f%d' % n; n += 1; sg.append(fid)
+            style = sg[2]; L = lab.strip(); nxt = text_after(k); key = None
+            if style.startswith('m:'):
+                sg[2] = 'm'; sg.append('memo')
+                kk2 = 'docdate' if ('docdate' not in used and L.endswith('วันที่')) else None
+                if kk2: used.add(kk2)
+                fields.append({'id': fid, 'type': 'date', 'label': L[-30:] or 'วันที่', 'key': kk2, 'sec': sec, 'memo': True}); k += 1; continue
+            if (L.endswith('ดิฉัน') or L.endswith('กระผม') or L.endswith('ข้าพเจ้า')) and 'name' not in used and sec == 0: key = 'name'
+            if L.endswith('ในปีงบประมาณนี้') and nxt.startswith('ได้ลา'): key = 'name'
+            if L.endswith('ประจำปีของ'): key = 'name'
+            if L.endswith('ตำแหน่ง') and sec == 0 and 'pos' not in used: key = 'pos'
+            if L.endswith('สังกัด') and sec == 0 and 'unit' not in used: key = 'unit'
+            if 'มีกำหนด' in L and 'days' not in used: key = 'days'
+            if L.endswith('จังหวัด') and 'prov' not in used: key = 'prov'
+            if L.endswith('เพื่อ') and 'reason' not in used: key = 'reason'
+            if L.endswith('ไปที่') and 'place' not in used: key = 'place'
+            if L.endswith('ป่วยเป็น') and 'illness' not in used: key = 'illness'
+            if L.endswith('เขียนที่'): key = 'writtenat'
+            if key and key != 'name': used.add(key)
+            if key == 'name': used.add('name')
+            fld = {'id': fid, 'type': 'text', 'label': (L if len(L) <= 26 else L[-26:].split(' ', 1)[-1]) or 'ช่องที่ %d' % n, 'key': key, 'sec': sec}
+            if style[:2] in ('d:', 'o:'): fld['def'] = style[2:]; sg[2] = style[0]
+            fields.append(fld); k += 1; continue
+        if sg[0] == 'c':
+            fid = 'c%d' % n; n += 1; sg.append(fid)
+            fields.append({'id': fid, 'type': 'check', 'label': text_after(k)[:24] or 'ช่องทำเครื่องหมาย', 'key': None, 'sec': sec}); k += 1; continue
+        k += 1
+    for l in lines:
+        for sg in l['s']:
+            if sg[0] == 'f' and len(sg) >= 4: sg[3] = pref + sg[3]
+            if sg[0] == 'c' and len(sg) >= 3: sg[2] = pref + sg[2]
+    for f in fields:
+        f['id'] = pref + f['id']
+        f['label'] = re.sub(r'^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+', '', f['label']).strip()
+    return lines, fields
+
+
+# ---------------------------------------------------------------------------
+# คำสั่งใช้งาน: เพิ่ม/ลบ/แสดงรายการแบบฟอร์มใน ../data/forms.js
+# ---------------------------------------------------------------------------
+import argparse, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(HERE, '..', 'data', 'forms.js')
+ASSETS = os.path.join(HERE, '..', 'assets')
+
+def load_data():
+    if not os.path.exists(DATA): return []
+    t = open(DATA, encoding='utf-8').read()
+    return json.loads(t[t.index('['): t.rindex(']') + 1])
+
+def save_data(items):
+    os.makedirs(os.path.dirname(DATA), exist_ok=True)
+    with open(DATA, 'w', encoding='utf-8') as f:
+        f.write('window.FORMS_DATA=' + json.dumps(items, ensure_ascii=False, separators=(',', ':')) + ';\n')
+
+def convert(pdf_path, page_nos, slug):
+    pages, fields = [], []
+    with pdfplumber.open(pdf_path) as pdf:
+        for idx, no in enumerate(page_nos):
+            pg = pdf.pages[no - 1]
+            lines, deco, images = page_model(pg)
+            lines, fl = build_fields(lines, 'p%d_' % idx)
+            deco = [d for d in deco if not (d[0] == 'h' and d[2] < 120 and d[3] < 300)]   # ตัดเส้นใต้หัวข้อใบลาออก
+            for j, im in enumerate(images):
+                os.makedirs(ASSETS, exist_ok=True)
+                fn = '%s-p%d-%d.png' % (slug, idx + 1, j + 1)
+                pg.crop((im['x'], im['y'], im['x'] + im['w'], im['y'] + im['h'])).to_image(resolution=300).save(os.path.join(ASSETS, fn))
+                im['src'] = 'assets/' + fn
+            pages.append({'lines': lines, 'deco': deco, 'images': images}); fields += fl
+    seen = {}
+    for f in fields:
+        c = seen.get(f['label'], 0); seen[f['label']] = c + 1
+        if c: f['label'] += ' (%d)' % (c + 1)
+    return pages, fields
+
+def main():
+    ap = argparse.ArgumentParser(description='จัดการแบบฟอร์มในพอร์ทัล')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    a = sub.add_parser('add', help='เพิ่ม/แทนที่แบบฟอร์มจากหน้าของไฟล์ PDF')
+    a.add_argument('pdf'); a.add_argument('--pages', default='1', help='เลขหน้าใน PDF คั่นด้วยจุลภาค เช่น 1 หรือ 3,4 (แบบฟอร์มหลายหน้า)')
+    a.add_argument('--slug', required=True, help='ชื่อสั้นภาษาอังกฤษ ใช้ในลิงก์ เช่น leave-sick')
+    a.add_argument('--title', required=True); a.add_argument('--group', default='การลา')
+    a.add_argument('--desc', default=''); a.add_argument('--all-days', action='store_true', help='นับเสาร์-อาทิตย์เป็นวันลาด้วย (เช่น ลาคลอด)')
+    sub.add_parser('list', help='แสดงรายการแบบฟอร์ม')
+    r = sub.add_parser('remove', help='ลบแบบฟอร์ม'); r.add_argument('slug')
+    args = ap.parse_args(); items = load_data()
+    if args.cmd == 'list':
+        for i, f in enumerate(items, 1): print(i, f['slug'], '-', f['title'], '(%d หน้า, %d ช่อง)' % (len(f['pages']), len(f['fields'])))
+    elif args.cmd == 'remove':
+        n = len(items); items = [f for f in items if f['slug'] != args.slug]; save_data(items); print('ลบแล้ว' if len(items) < n else 'ไม่พบ slug นี้')
+    else:
+        pages, fields = convert(args.pdf, [int(x) for x in args.pages.split(',')], args.slug)
+        ar = sum(len(re.findall(r'[0-9]', sg[1])) for p in pages for l in p['lines'] for sg in l['s'] if sg[0] == 't')
+        th = sum(len(re.findall(r'[๐-๙]', sg[1])) for p in pages for l in p['lines'] for sg in l['s'] if sg[0] == 't')
+        entry = {'slug': args.slug, 'title': args.title, 'group': args.group, 'desc': args.desc, 'allDays': args.all_days,
+                 'digits': 'ar' if ar > th else 'th', 'pages': pages, 'fields': fields}
+        for i, f in enumerate(items):
+            if f['slug'] == args.slug: items[i] = entry; break
+        else: items.append(entry)
+        save_data(items)
+        keyed = sorted({x['key'] for x in fields if x['key']})
+        print('เพิ่มแล้ว: %s (%d หน้า, %d ช่อง, ช่องที่ระบบรู้จัก: %s)' % (args.title, len(pages), len(fields), ', '.join(keyed) or '-'))
+
+if __name__ == '__main__':
+    main()
