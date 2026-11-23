@@ -37,7 +37,7 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .ln b{font-weight:700}
 .f{flex:var(--g) 1 0;min-width:min-content;text-align:center;overflow:hidden;white-space:nowrap;height:1.0973em;line-height:1.0973;margin:0 .08em;position:relative}
 .f::after{content:'';position:absolute;left:0;right:0;bottom:calc(var(--b,3px) - 1px);border-bottom:1.3px dotted #000;pointer-events:none}
-.f.o{text-align:left}.f.p{text-align:center}.f.o::after,.f.m::after{display:none}.f.m{text-align:center}
+.f.o,.f.m{text-align:left;overflow:visible;min-width:0;padding-left:.3em}.f.p{text-align:center}.f.o::after,.f.m::after{display:none}
 .v{display:inline-block;min-width:1.7em}
 .pb{display:inline-block;width:0;height:0;vertical-align:baseline}
 .rl{flex:var(--g) 1 0;border-bottom:1px solid #000;height:14pt}
@@ -46,7 +46,7 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .cb.on::after{content:'\2713';position:absolute;left:1pt;top:-5pt;font-size:15pt;line-height:1}
 .dc{position:absolute;height:0}.dc.h{border-top:.7pt solid #000}.dc.v{border-left:.7pt solid #000;width:0}.dc.r{border:.75pt solid #000}.dc.d{border-top:1.3px dotted #000}
 .pimg{position:absolute}
-.ul{position:absolute;bottom:calc(var(--bb,3px) - 3px);height:0;border-bottom:1.3px dotted #000;pointer-events:none}
+.ul{position:absolute;bottom:calc(var(--bb,3px) - .5px);height:0;border-bottom:1.3px dotted #000;pointer-events:none}
 .gh{position:absolute;left:0;bottom:0;width:0;height:1.0973em;line-height:1.0973;visibility:hidden}
 @media (max-width:1050px){.wrap{flex-direction:column;align-items:center}.panel{position:static;max-height:none;width:100%;max-width:640px}}
 @page{size:A4;margin:0}
@@ -74,7 +74,8 @@ const FORMS=window.FORMS_DATA||[];
 const MONTHS=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 const SHORT=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
 const HOLIDAYS=CFG.holidays||[]; // กำหนดวันหยุดราชการใน config.js
-const thai=t=>(FORMS[cur]&&FORMS[cur].digits==='ar')?String(t):String(t).replace(/[0-9]/g,d=>'๐๑๒๓๔๕๖๗๘๙'[d]); /* แบบฟอร์มที่ต้นฉบับใช้เลขอารบิก (digits=ar) จะไม่แปลงเป็นเลขไทย */
+const thaiV=t=>String(t).replace(/[0-9]/g,d=>'๐๑๒๓๔๕๖๗๘๙'[d]); /* ข้อมูลที่กรอก: เลขไทยเสมอ */
+const thai=t=>(FORMS[cur]&&FORMS[cur].digits==='ar')?String(t):thaiV(t); /* ข้อความที่พิมพ์อยู่ในแบบ: คงตามต้นฉบับ */ /* แบบฟอร์มที่ต้นฉบับใช้เลขอารบิก (digits=ar) จะไม่แปลงเป็นเลขไทย */
 const $=id=>document.getElementById(id);
 const SAMPLE=Object.assign({pron:'ดิฉัน',shortMonth:true},CFG.defaults||{});
 const KEYORDER=['name','pos','unit','docdate','writtenat','reason','illness','start','end','days','birth','place','prov','go','back'];
@@ -151,7 +152,7 @@ function fill(){
   document.querySelectorAll('#pages .f[data-id]').forEach(el=>{
     const m=fmap[el.dataset.id],tv=el.querySelector('.v');if(!m){tv.textContent='';return}
     const [f,i]=m,v=vals[vk(i,f)]??f.def??'';
-    tv.textContent=thai(f.type==='date'?datePart(v,el.dataset.part):v);
+    tv.textContent=thaiV(f.type==='date'?datePart(v,el.dataset.part):v);
   });
   document.querySelectorAll('#pages .cb').forEach(el=>{
     const m=fmap[el.dataset.id];if(!m)return;
@@ -170,7 +171,7 @@ function fill(){
   const over=new Set();
   document.querySelectorAll('#pages .f').forEach(el=>{ /* ย่อเฉพาะตัวอักษรในช่อง เส้นประคงที่ */
     const v=el.querySelector('.v');v.style.fontSize='';
-    if(!FONT_OK){let s=parseFloat(getComputedStyle(el).fontSize)*0.75;
+    if(!FONT_OK&&!el.classList.contains('o')&&!el.classList.contains('m')){let s=parseFloat(getComputedStyle(el).fontSize)*0.75;
       while(v.getBoundingClientRect().width>el.clientWidth-1&&s>9){s-=0.5;v.style.fontSize=s+'pt'}}
     /* วางเส้นประให้อยู่ที่เส้นฐานของตัวอักษร (baseline) เสมอ */
     el.style.setProperty('--b',(el.getBoundingClientRect().bottom-el.querySelector('.pb').getBoundingClientRect().bottom)+'px');

@@ -102,14 +102,14 @@ def page_model(pg):
         keepB = []; uls = []
         for b in bspans:
             sx0, sx1 = b[1], b[2]
-            cov = [a for a in base_atoms if a[0] == 'c' and a[3] not in DOTS and a[3] != '_' and sx0 - 0.5 <= (a[1] + a[2]) / 2 <= sx1 + 0.5]
+            cov = [a for a in base_atoms if a[0] == 'c' and not COMB(a[3]) and a[3] not in DOTS and a[3] != '_' and sx0 - 0.5 <= (a[1] + a[2]) / 2 <= sx1 + 0.5]
             if cov:
                 uls.append((sx0, sx1))
                 tag = ('S', sx0, sx1)
                 reg = [a for a in cov if 'Bold' not in a[4]]
                 if reg:
                     lo = min(a[1] for a in reg); hi = max(a[2] for a in reg)
-                    cid = set(id(a) for a in base_atoms if a[0] == 'c' and 'Bold' not in a[4] and lo - 0.5 <= (a[1] + a[2]) / 2 <= hi + 0.5)
+                    cid = set(id(a) for a in base_atoms if a[0] == 'c' and not COMB(a[3]) and 'Bold' not in a[4] and lo - 0.5 <= (a[1] + a[2]) / 2 <= hi + 0.5)
                 else: cid = set()
                 base_atoms = [(a[:6] + (tag,) + a[7:]) if id(a) in cid else a for a in base_atoms]
             else: keepB.append(b)
@@ -118,7 +118,7 @@ def page_model(pg):
             if COMB(a[3]) and groups: groups[-1].append(a)
             else: groups.append([a])
         groups.sort(key=lambda g: g[0][1])
-        flat = [a for g in groups for a in g]
+        flat = [a for g in groups for a in ([g[0]] + [(m[:6] + (g[0][6],) + m[7:]) for m in g[1:]])]
         bs = sorted(keepB, key=lambda a: a[1]); atoms = []
         for a in flat:
             while bs and bs[0][1] <= a[1] and not COMB(a[3]): atoms.append(bs.pop(0))
