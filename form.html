@@ -45,6 +45,8 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .cb.on::after{content:'\2713';position:absolute;left:1pt;top:-5pt;font-size:15pt;line-height:1}
 .dc{position:absolute;height:0}.dc.h{border-top:.7pt solid #000}.dc.v{border-left:.7pt solid #000;width:0}.dc.r{border:.75pt solid #000}.dc.d{border-top:1.3px dotted #000}
 .pimg{position:absolute}
+.ul{position:absolute;bottom:calc(var(--bb,3px) - 3px);height:0;border-bottom:1.3px dotted #000;pointer-events:none}
+.gh{position:absolute;left:0;bottom:0;width:0;height:1.0973em;line-height:1.0973;visibility:hidden}
 @media (max-width:1050px){.wrap{flex-direction:column;align-items:center}.panel{position:static;max-height:none;width:100%;max-width:640px}}
 @page{size:A4;margin:0}
 @media print{body{background:#fff}.wrap{display:block;padding:0}.panel{display:none}.stage{overflow:visible}.sheet{box-shadow:none;margin:0;break-after:page;page-break-after:always}.sheet:last-child{break-after:auto;page-break-after:auto}}
@@ -132,6 +134,8 @@ function buildSheet(){
         else if(t==='c'){el=document.createElement('span');el.className='cb';el.dataset.id=sg[2]||'';const s=Math.min(Math.max(sg[1],9),18);el.style.width=el.style.height=s+'pt'}
         ln.append(el);
       });
+      (L.ul||[]).forEach(u=>{const d=document.createElement('div');d.className='ul';d.style.cssText=`left:${u[0]}pt;width:${u[1]}pt`;ln.append(d)});
+      if(L.ul){const g=document.createElement('span');g.className='gh';g.append(Object.assign(document.createElement('i'),{className:'pb'}));ln.append(g)}
       sh.append(ln);
     });
   });
@@ -172,6 +176,10 @@ function fill(){
   });
   if(FONT_OK)document.querySelectorAll('#pages .ln').forEach(ln=>{ /* บรรทัดที่ข้อความดันเกินความกว้างเดิม: เตือนช่องที่มีข้อมูล */
     if(ln.scrollWidth>ln.clientWidth+1)ln.querySelectorAll('.f[data-id]').forEach(f=>{if(f.querySelector('.v').textContent)over.add(f.dataset.id)});
+  });
+  document.querySelectorAll('#pages .ln').forEach(ln=>{ /* เส้นประใต้ข้อความที่พิมพ์ไว้: วางที่เส้นฐานของบรรทัดเดียวกัน */
+    const g=ln.querySelector('.gh');if(!g)return;
+    ln.style.setProperty('--bb',(g.getBoundingClientRect().bottom-g.querySelector('.pb').getBoundingClientRect().bottom)+'px');
   });
   /* เตือนในแผงกรอกข้อมูลเมื่อข้อความยาวเกินช่อง */
   const F2=FORMS[cur],keys=new Set();

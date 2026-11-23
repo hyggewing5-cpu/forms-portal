@@ -58,7 +58,9 @@ def page_model(pg):
         k = 'K' if ('Wingdings' in c['fontname'] and c['text'] not in ('✓', '\uf0fc')) else 'c'
         lines[nearest(c['bottom'])]['atoms'].append((k, c['x0'], c['x1'], c['text'], c['fontname'], c['top'], False, round(c['size'], 1)))
     def dom(L):
-        sz = collections.Counter(a[7] for a in L['atoms'] if a[0] == 'c' and a[3] not in DOTS and a[3] != '_')
+        ok = [a for a in L['atoms'] if a[0] == 'c' and a[3] not in DOTS and a[3] != '_']
+        reg = [a for a in ok if 'Bold' not in a[4]]
+        sz = collections.Counter(a[7] for a in (reg or ok))
         return sz.most_common(1)[0][0] if sz else base
     for L in lines: L['z'] = dom(L)
     # offset of dotted underline below the text bottom
@@ -97,12 +99,12 @@ def page_model(pg):
                     base_atoms = [(a[:6] + (True,) + a[7:]) if id(a) in ids else a for a in base_atoms
                                   if not (a in leader and ox0 - 1.5 <= (a[1] + a[2]) / 2 <= ox1 + 1.5)]
         # (2) dotted underline that already carries typed text -> keep as a decoration, make the text editable
-        keepB = []
+        keepB = []; uls = []
         for b in bspans:
             sx0, sx1 = b[1], b[2]
             cov = [a for a in base_atoms if a[0] == 'c' and a[3] not in DOTS and a[3] != '_' and sx0 - 0.5 <= (a[1] + a[2]) / 2 <= sx1 + 0.5]
             if cov:
-                deco.append(['d', round(sx0, 1), round(b[5], 1), round(sx1 - sx0, 1)])
+                uls.append((sx0, sx1))
                 tag = ('S', sx0, sx1)
                 reg = [a for a in cov if 'Bold' not in a[4]]
                 if reg:
@@ -193,7 +195,9 @@ def page_model(pg):
         x0 = atoms[0][1]
         main = [a for a in atoms if a[0] == 'c' and abs(a[7] - z) < 0.6 and a[3] not in DOTS]
         ytop = statistics.mean(a[5] for a in main) if main else L['cb'] - z
-        out.append({'x': round(x0, 1), 'y': round(ytop, 1), 'w': round(xmax - x0, 1), 'z': z, 's': segs})
+        item = {'x': round(x0, 1), 'y': round(ytop, 1), 'w': round(xmax - x0, 1), 'z': z, 's': segs}
+        if uls: item['ul'] = [[round(a - x0, 1), round(b - a, 1)] for a, b in uls]
+        out.append(item)
     images = [{'x': round(im['x0'], 1), 'y': round(im['top'], 1), 'w': round(im['width'], 1), 'h': round(im['height'], 1)} for im in pg.images]
     return out, deco, images
 
