@@ -125,14 +125,19 @@ def page_model(pg):
             atoms.append(a)
         atoms += bs
         if not atoms: continue
-        segs, state = [], {'text': '', 'st': None}
+        segs, sxs, state = [], [], {'text': '', 'st': None, 'x0': None, 'x1': None}
+        def put(sg, a, b):
+            segs.append(sg); sxs.append((a, b))
         def flush():
             if state['text']:
                 s, b = state['st']
-                segs.append(['t', state['text'], 0 if abs(s - z) < 0.6 else s, 1 if b else 0]); state['text'] = ''
-        def addtext(t, st):
+                put(['t', state['text'], 0 if abs(s - z) < 0.6 else s, 1 if b else 0], state['x0'], state['x1']); state['text'] = ''; state['x0'] = None
+        def addtext(t, st, xa=None, xb=None):
             if state['text'] and state['st'] != st: flush()
             state['st'] = st; state['text'] += t
+            if xa is not None:
+                if state['x0'] is None: state['x0'] = xa
+                state['x1'] = xb
         prev = None; xmax = max(a[2] for a in atoms); i = 0
         while i < len(atoms):
             k, x0, x1, ch, fn, top, ov, sz = atoms[i]
@@ -146,7 +151,7 @@ def page_model(pg):
                     if not COMB(aa[3]): pv = aa[2]
                     j += 1
                 if pv is None: pv = atoms[j - 1][2]
-                segs.append(['v', vt, round(pv - x0, 1)]); prev = pv; i = j; continue
+                put(['v', vt, round(pv - x0, 1)], x0, pv); prev = pv; i = j; continue
             if isinstance(ov, tuple):
                 flush(); j = i; vt = ''; pv = None; sx1 = ov[2]
                 while j < len(atoms) and atoms[j][6] == ov:
@@ -160,16 +165,16 @@ def page_model(pg):
                 nxt = atoms[j] if j < len(atoms) else None
                 right = nxt[1] if (nxt and nxt[0] != 'B' and nxt[1] < sx1 + 1) else sx1
                 right = max(right, pv)
-                if MEMO.match(vt.strip()): segs.append(['f', round(pv - left, 1), 'm:' + vt.strip()]); prev = pv
-                else: segs.append(['f', round(right - left, 1), 'o:' + vt.strip()]); prev = right
+                if MEMO.match(vt.strip()): put(['f', round(pv - left, 1), 'm:' + vt.strip()], left, pv); prev = pv
+                else: put(['f', round(right - left, 1), 'o:' + vt.strip()], left, right); prev = right
                 xmax = max(xmax, prev); i = j; continue
             if k == 'B':
-                flush(); segs.append(['f', round(x1 - x0, 1), 'u']); prev = x1; i += 1; continue
+                flush(); put(['f', round(x1 - x0, 1), 'u'], x0, x1); prev = x1; i += 1; continue
             if k == 'K':
                 flush()
-                if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
+                if prev is not None and gap > 14: put(['g', round(gap, 1)], prev, x0)
                 elif prev is not None and gap >= 2.0 and segs and segs[-1][0] == 't': segs[-1][1] += ' ' * max(1, round(gap / SP))
-                segs.append(['c', round(x1 - x0, 1)]); prev = x1; i += 1; continue
+                put(['c', round(x1 - x0, 1)], x0, x1); prev = x1; i += 1; continue
             if ch in DOTS or ch == '_':
                 j = i; rx1 = x1
                 while j + 1 < len(atoms) and atoms[j + 1][3] == ch and atoms[j + 1][6] is False and atoms[j + 1][1] - rx1 <= 4.6:
@@ -177,27 +182,44 @@ def page_model(pg):
                 n = j - i + 1
                 if ch == '_':
                     flush()
-                    if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
-                    segs.append(['r', round(rx1 - x0, 1)]); prev = rx1; i = j + 1; continue
+                    if prev is not None and gap > 14: put(['g', round(gap, 1)], prev, x0)
+                    put(['r', round(rx1 - x0, 1)], x0, rx1); prev = rx1; i = j + 1; continue
                 if n >= 4:
                     flush()
-                    if prev is not None and gap > 14: segs.append(['g', round(gap, 1)])
-                    segs.append(['f', round(rx1 - x0, 1), 'd']); prev = rx1; i = j + 1; continue
+                    if prev is not None and gap > 14: put(['g', round(gap, 1)], prev, x0)
+                    put(['f', round(rx1 - x0, 1), 'd'], x0, rx1); prev = rx1; i = j + 1; continue
             if COMB(ch):
                 addtext(ch, state['st'] or (sz, 'Bold' in fn)); i += 1; continue
             st = (sz, 'Bold' in fn)
             if prev is not None:
-                if gap > 14: flush(); segs.append(['g', round(gap, 1)])
+                if gap > 14: flush(); put(['g', round(gap, 1)], prev, x0)
                 elif gap >= 2.0: addtext(' ' * max(1, round(gap / SP)), state['st'] or st)
-            addtext(ch, st); prev = x1; i += 1
+            addtext(ch, st, x0, x1); prev = x1; i += 1
         flush()
         if not segs: continue
-        x0 = atoms[0][1]
+        # blank parentheses "(      )" -> editable field
+        for k2 in range(1, len(segs) - 1):
+            if segs[k2][0] == 'g' and segs[k2][1] >= 14 and segs[k2 - 1][0] == 't' and segs[k2 - 1][1].rstrip().endswith('(') and segs[k2 + 1][0] == 't' and segs[k2 + 1][1].lstrip().startswith(')'):
+                segs[k2] = ['f', segs[k2][1], 'p']
+        # split into independent chunks at wide gaps / before check boxes so columns stay aligned with the PDF
+        chunks, cur = [], []
+        for idx, sg in enumerate(segs):
+            if sg[0] == 'g':
+                if cur: chunks.append(cur); cur = []
+                continue
+            if sg[0] == 'c' and cur: chunks.append(cur); cur = []
+            cur.append(idx)
+        if cur: chunks.append(cur)
         main = [a for a in atoms if a[0] == 'c' and abs(a[7] - z) < 0.6 and a[3] not in DOTS]
         ytop = statistics.mean(a[5] for a in main) if main else L['cb'] - z
-        item = {'x': round(x0, 1), 'y': round(ytop, 1), 'w': round(xmax - x0, 1), 'z': z, 's': segs}
-        if uls: item['ul'] = [[round(a - x0, 1), round(b - a, 1)] for a, b in uls]
-        out.append(item)
+        made = []
+        for ch_ in chunks:
+            cx0 = sxs[ch_[0]][0]; cx1 = max(sxs[ch_[-1]][1], cx0 + 1)
+            made.append({'x': round(cx0, 1), 'y': round(ytop, 1), 'w': round(cx1 - cx0, 1), 'z': z, 's': [segs[q] for q in ch_]})
+        for a, b in uls:
+            tgt = next((m for m in made if m['x'] - 2 <= a <= m['x'] + m['w'] + 2), made[0])
+            tgt.setdefault('ul', []).append([round(a - tgt['x'], 1), round(b - a, 1)])
+        out.extend(made)
     images = [{'x': round(im['x0'], 1), 'y': round(im['top'], 1), 'w': round(im['width'], 1), 'h': round(im['height'], 1)} for im in pg.images]
     return out, deco, images
 
@@ -207,7 +229,7 @@ def build_fields(lines, pref):
     for l in lines:
         for sg in l['s']:
             if sg[0] == 't': sg[1] = re.sub(r'พ\.ศ(?!\.)', 'พ.ศ.', sg[1])
-        if any(s[0] == 't' and 'ทำเครื่องหมาย' in s[1] for s in l['s']):
+        if any(s[0] == 't' and 'ทำเครื่องหมาย' in s[1] for m in lines if abs(m['y'] - l['y']) < 2 for s in m['s']):
             l['s'] = [['t', '\u2610', 0, 0] if s[0] == 'c' else s for s in l['s']]
     ysplit = next((l['y'] for l in lines if any(s[0] == 't' and ('ควรมิควรแล้วแต่จะกรุณา' in s[1] or 'จึงเรียนมา' in s[1]) for s in l['s'])), 9999)
     # typed text over leader dots -> one field with a default value
@@ -222,6 +244,27 @@ def build_fields(lines, pref):
                 val = re.sub(r'^ผบ\s*บน\s*๕$', 'ผบ.บน.๕', s_[i][1])
                 s_[lo:hi + 1] = [['f', round(w, 1), 'd:' + val]]; i = lo + 1
             else: i += 1
+    grp_at, cur_g, cur_sub = [], '', ''
+    for li_, l in enumerate(lines):
+        s0 = l['s']
+        if len(s0) == 1 and s0[0][0] == 't' and re.fullmatch(r'\(?\d+\)', s0[0][1].strip()):
+            cur_sub = s0[0][1].strip()
+        if len(s0) == 1 and s0[0][0] == 't' and re.fullmatch(r'\d+\.', s0[0][1].strip()):
+            cur_sub = ''
+            nx = next((m for m in lines[li_ + 1: li_ + 4] if abs(m['y'] - l['y']) < 2), None)
+            if nx:
+                tx = next((sg[1] for sg in nx['s'] if sg[0] == 't' and norm(sg[1])), '')
+                cur_g = 'ข้อ %s %s' % (s0[0][1].strip().rstrip('.'), tx.strip()[:26])
+        grp_at.append(cur_g + (' ' + cur_sub if cur_sub else ''))
+    def plabel(li_):
+        ys = [m['y'] for m in lines if m['y'] < lines[li_]['y'] - 3]
+        txts = []
+        if ys:
+            py = max(ys); txts = [sg[1].strip() for m in lines if abs(m['y'] - py) < 2 for sg in m['s'] if sg[0] == 't' and norm(sg[1])]
+        if any('ลงชื่อ' in t for t in txts):
+            role = [t for t in txts if 'ลงชื่อ' not in t and len(t) > 2]
+            return 'ชื่อ-สกุล' + (' ' + role[-1][:30] if role else '')
+        return 'จำนวนเงินเป็นตัวอักษร'
     toks = [(li, si) for li, l in enumerate(lines) for si, _ in enumerate(l['s'])]
     S = lambda k: lines[toks[k][0]]['s'][toks[k][1]]
     N = len(toks); fields = []; n = 0; used = set(); dategroups = 0
@@ -258,11 +301,11 @@ def build_fields(lines, pref):
             elif lab.endswith('วันที่') and 'docdate' not in used and 'ตั้งแต่' not in lab: key = 'docdate'
             dategroups += 1
             if key: used.add(key)
-            fields.append({'id': fid, 'type': 'date', 'label': lab[-30:] or 'วันที่', 'key': key, 'sec': sec}); k += 5; continue
+            fields.append({'li': li, 'id': fid, 'type': 'date', 'label': lab[-30:] or 'วันที่', 'key': key, 'sec': sec}); k += 5; continue
         if isF(k) and isT(k + 1, '/') and isF(k + 2) and isT(k + 3, '/') and isF(k + 4):
             fid = 'd%d' % n; n += 1
             for part, kk in zip(('dn', 'mn', 'y'), (k, k + 2, k + 4)): S(kk).extend([fid, part])
-            fields.append({'id': fid, 'type': 'date', 'label': (label_before(k)[-30:] or 'วันที่ลงความเห็น'), 'key': None, 'sec': sec, 'short': True}); k += 5; continue
+            fields.append({'li': li, 'id': fid, 'type': 'date', 'label': (label_before(k)[-30:] or 'วันที่ลงความเห็น'), 'key': None, 'sec': sec, 'short': True}); k += 5; continue
         if isF(k):
             lab = label_before(k); fid = 'f%d' % n; n += 1; sg.append(fid)
             style = sg[2]; L = lab.strip(); nxt = text_after(k); key = None
@@ -270,7 +313,7 @@ def build_fields(lines, pref):
                 sg[2] = 'm'; sg.append('memo')
                 kk2 = 'docdate' if ('docdate' not in used and L.endswith('วันที่')) else None
                 if kk2: used.add(kk2)
-                fields.append({'id': fid, 'type': 'date', 'label': L[-30:] or 'วันที่', 'key': kk2, 'sec': sec, 'memo': True}); k += 1; continue
+                fields.append({'li': li, 'id': fid, 'type': 'date', 'label': L[-30:] or 'วันที่', 'key': kk2, 'sec': sec, 'memo': True}); k += 1; continue
             if (L.endswith('ดิฉัน') or L.endswith('กระผม') or L.endswith('ข้าพเจ้า')) and 'name' not in used and sec == 0: key = 'name'
             if L.endswith('ในปีงบประมาณนี้') and nxt.startswith('ได้ลา'): key = 'name'
             if L.endswith('ประจำปีของ'): key = 'name'
@@ -284,18 +327,23 @@ def build_fields(lines, pref):
             if L.endswith('เขียนที่'): key = 'writtenat'
             if key and key != 'name': used.add(key)
             if key == 'name': used.add('name')
-            fld = {'id': fid, 'type': 'text', 'label': (L if len(L) <= 26 else L[-26:].split(' ', 1)[-1]) or 'ช่องที่ %d' % n, 'key': key, 'sec': sec}
+            labtxt = (L if len(L) <= 26 else L[-26:].split(' ', 1)[-1]) or 'ช่องที่ %d' % n
+            if style == 'p' or L == '(' or L.endswith('('): labtxt = plabel(li)
+            elif L.startswith('(ลงชื่อ') or L == 'ลงชื่อ' or L.endswith('ลงชื่อ)'):
+                labtxt = 'ลงชื่อ' + (' ' + nxt[:30] if nxt and 'ลงชื่อ' not in nxt and len(nxt) > 2 and not nxt.startswith('(') else '')
+            fld = {'li': li, 'id': fid, 'type': 'text', 'label': labtxt, 'key': key, 'sec': sec}
             if style[:2] in ('d:', 'o:'): fld['def'] = style[2:]; sg[2] = style[0]
             fields.append(fld); k += 1; continue
         if sg[0] == 'c':
             fid = 'c%d' % n; n += 1; sg.append(fid)
-            fields.append({'id': fid, 'type': 'check', 'label': text_after(k)[:24] or 'ช่องทำเครื่องหมาย', 'key': None, 'sec': sec}); k += 1; continue
+            fields.append({'li': li, 'id': fid, 'type': 'check', 'label': text_after(k)[:60] or 'ช่องทำเครื่องหมาย', 'key': None, 'sec': sec}); k += 1; continue
         k += 1
     for l in lines:
         for sg in l['s']:
             if sg[0] == 'f' and len(sg) >= 4: sg[3] = pref + sg[3]
             if sg[0] == 'c' and len(sg) >= 3: sg[2] = pref + sg[2]
     for f in fields:
+        f['grp'] = grp_at[f.pop('li')]
         f['id'] = pref + f['id']
         f['label'] = re.sub(r'^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+', '', f['label']).strip()
     return lines, fields
@@ -336,7 +384,7 @@ def convert(pdf_path, page_nos, slug):
             pages.append({'lines': lines, 'deco': deco, 'images': images}); fields += fl
     seen = {}
     for f in fields:
-        c = seen.get(f['label'], 0); seen[f['label']] = c + 1
+        k_ = (f.get('grp'), f['label']); c = seen.get(k_, 0); seen[k_] = c + 1
         if c: f['label'] += ' (%d)' % (c + 1)
     return pages, fields
 

@@ -14,6 +14,7 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .wrap{display:flex;gap:24px;align-items:flex-start;padding:20px;justify-content:center}
 .panel{width:390px;flex:none;background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px;position:sticky;top:20px;max-height:calc(100vh - 40px);overflow:auto;font-size:16px}
 .panel h1{margin:6px 0 10px;font-size:20px}
+.panel .sub{font-weight:700;font-size:14px;color:var(--brand);border-bottom:1px solid var(--line);padding:8px 0 2px;margin-top:6px}
 .back{font-size:14px;color:var(--brand);text-decoration:none}.back:hover{text-decoration:underline}
 .panel fieldset{border:0;border-top:1px solid var(--line);margin:14px 0 0;padding:12px 0 0}
 .panel legend{font-weight:700;padding:0 8px 0 0;font-size:15px}
@@ -36,7 +37,7 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .ln b{font-weight:700}
 .f{flex:var(--g) 1 0;min-width:min-content;text-align:center;overflow:hidden;white-space:nowrap;height:1.0973em;line-height:1.0973;margin:0 .08em;position:relative}
 .f::after{content:'';position:absolute;left:0;right:0;bottom:calc(var(--b,3px) - 1px);border-bottom:1.3px dotted #000;pointer-events:none}
-.f.o{text-align:left}.f.o::after,.f.m::after{display:none}.f.m{text-align:center}
+.f.o{text-align:left}.f.p{text-align:center}.f.o::after,.f.m::after{display:none}.f.m{text-align:center}
 .v{display:inline-block;min-width:1.7em}
 .pb{display:inline-block;width:0;height:0;vertical-align:baseline}
 .rl{flex:var(--g) 1 0;border-bottom:1px solid #000;height:14pt}
@@ -76,8 +77,8 @@ const HOLIDAYS=CFG.holidays||[]; // กำหนดวันหยุดรา�
 const thai=t=>(FORMS[cur]&&FORMS[cur].digits==='ar')?String(t):String(t).replace(/[0-9]/g,d=>'๐๑๒๓๔๕๖๗๘๙'[d]); /* แบบฟอร์มที่ต้นฉบับใช้เลขอารบิก (digits=ar) จะไม่แปลงเป็นเลขไทย */
 const $=id=>document.getElementById(id);
 const SAMPLE=Object.assign({pron:'ดิฉัน',shortMonth:true},CFG.defaults||{});
-const KEYORDER=['name','pos','docdate','writtenat','reason','illness','start','end','days','birth','place','prov','go','back'];
-const KEYLABEL={name:'ชื่อ-สกุล',pos:'ตำแหน่ง',docdate:'วันที่เขียน',writtenat:'เขียนที่',reason:'เหตุผลการลา',illness:'ป่วยเป็น',start:'ตั้งแต่วันที่',end:'ถึงวันที่',days:'จำนวนวัน',birth:'วันที่คลอดบุตร',place:'สถานที่ที่จะไป',prov:'จังหวัด',go:'วันที่ออกเดินทาง',back:'วันที่กลับ'};
+const KEYORDER=['name','pos','unit','docdate','writtenat','reason','illness','start','end','days','birth','place','prov','go','back'];
+const KEYLABEL={name:'ชื่อ-สกุล',pos:'ตำแหน่ง',unit:'สังกัด',docdate:'วันที่เขียน',writtenat:'เขียนที่',reason:'เหตุผลการลา',illness:'ป่วยเป็น',start:'ตั้งแต่วันที่',end:'ถึงวันที่',days:'จำนวนวัน',birth:'วันที่คลอดบุตร',place:'สถานที่ที่จะไป',prov:'จังหวัด',go:'วันที่ออกเดินทาง',back:'วันที่กลับ'};
 let cur=0, vals={...SAMPLE}, dirty={}, FONT_OK=false;
 const REM=['name','pos','pron'];
 try{const p=JSON.parse(localStorage.getItem('formPrefs')||'null');if(p){Object.assign(vals,p);vals.remember=true}}catch(e){}
@@ -127,7 +128,7 @@ function buildSheet(){
           if(sg[2])el.style.fontSize=(sg[2]/L.z).toFixed(4)+'em';
           if(sg[3])el.style.fontWeight='700';
         }else if(t==='f'){
-          el=document.createElement('span');el.className='f'+(sg[2]==='o'?' o':sg[2]==='m'?' m':'');el.style.setProperty('--g',sg[1]);
+          el=document.createElement('span');el.className='f'+(sg[2]==='o'?' o':sg[2]==='m'?' m':sg[2]==='p'?' o p':'');el.style.setProperty('--g',sg[1]);
           el.dataset.id=sg[3]||'';el.dataset.part=sg[4]||'';const v=document.createElement('span');v.className='v';el.append(v,Object.assign(document.createElement('i'),{className:'pb'}));
         }else if(t==='g'){el=document.createElement('span');el.className='gp';el.style.width=sg[1]+'pt'}
         else if(t==='r'){el=document.createElement('span');el.className='rl';el.style.setProperty('--g',sg[1])}
@@ -225,9 +226,11 @@ function buildPanel(){
   F.fields.forEach((f,i)=>{if(f.key&&!byKey[f.key])byKey[f.key]=[f,i]});
   KEYORDER.forEach(k=>{if(byKey[k]){const [f,i]=byKey[k];main.append(input({...f,label:KEYLABEL[k]},i,KEYLABEL[k]));seen.add(k)}});
   const a=[],b=[];
-  F.fields.forEach((f,i)=>{if(f.key)return;(f.sec?b:a).push([f,i])});
-  if(a.length){const g=mk('ข้อมูลอื่นในแบบฟอร์ม');a.forEach(([f,i])=>g.append(input(f,i,f.label)))}
-  if(b.length){const g=mk('ส่วนเจ้าหน้าที่ / ผู้บังคับบัญชา (เว้นว่างไว้ถ้าจะเซ็นด้วยมือ)');b.forEach(([f,i])=>g.append(input(f,i,f.label)))}
+  const seenK=new Set();
+  F.fields.forEach((f,i)=>{if(f.key){if(KEYORDER.includes(f.key)||seenK.has(f.key))return;seenK.add(f.key)}(f.sec?b:a).push([f,i])});
+  const fillG=(g,arr)=>{let last=null;arr.forEach(([f,i])=>{if(f.grp&&f.grp!==last){const h=document.createElement('div');h.className='full sub';h.textContent=f.grp;g.append(h)}last=f.grp;g.append(input(f,i,f.label))})};
+  if(a.length){const g=mk('ข้อมูลอื่นในแบบฟอร์ม');fillG(g,a)}
+  if(b.length){const g=mk('ส่วนเจ้าหน้าที่ / ผู้บังคับบัญชา (เว้นว่างไว้ถ้าจะเซ็นด้วยมือ)');fillG(g,b)}
 }
 function show(i){cur=i;dirty={};buildPanel();buildSheet();$('formSel').value=i;
   document.title=FORMS[i].title+' | '+(CFG.title||'แบบฟอร์มออนไลน์');
