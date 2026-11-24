@@ -202,6 +202,11 @@ def page_model(pg):
             addtext(ch, st, x0, x1); prev = x1; i += 1
         flush()
         if not segs: continue
+        # "(ลงชื่อ) พ.อ.อ.      (เจ้าหน้าที่ตรวจสอบ)": the blank gap becomes a dotted, fillable line
+        for k2 in range(1, len(segs) - 1):
+            if (segs[k2][0] == 'g' and segs[k2][1] >= 14 and segs[k2 - 1][0] == 't' and segs[k2 + 1][0] == 't'
+                    and 'เจ้าหน้าที่ตรวจสอบ' in segs[k2 + 1][1] and any('ลงชื่อ' in q[1] for q in segs[:k2] if q[0] == 't')):
+                segs[k2] = ['f', segs[k2][1], 'd']
         # blank parentheses "(      )" -> editable field
         for k2 in range(1, len(segs) - 1):
             if segs[k2][0] == 'g' and segs[k2][1] >= 14 and segs[k2 - 1][0] == 't' and segs[k2 - 1][1].rstrip().endswith('(') and segs[k2 + 1][0] == 't' and segs[k2 + 1][1].lstrip().startswith(')'):
@@ -334,7 +339,8 @@ def build_fields(lines, pref):
             if key and key != 'name': used.add(key)
             if key == 'name': used.add('name')
             labtxt = (L if len(L) <= 26 else L[-26:].split(' ', 1)[-1]) or 'ช่องที่ %d' % n
-            if style == 'p' or L == '(' or L.endswith('('): labtxt = plabel(li)
+            if nxt.lstrip().startswith(('(เจ้าหน้าที่', 'เจ้าหน้าที่')): labtxt = 'ชื่อ' + nxt.strip(' ()')[:30]
+            elif style == 'p' or L == '(' or L.endswith('('): labtxt = plabel(li)
             elif L.startswith('(ลงชื่อ') or L == 'ลงชื่อ' or L.endswith('ลงชื่อ)'):
                 labtxt = 'ลงชื่อ' + (' ' + nxt[:30] if nxt and 'ลงชื่อ' not in nxt and len(nxt) > 2 and not nxt.startswith('(') else '')
             fld = {'li': li, 'id': fid, 'type': 'text', 'label': labtxt, 'key': key, 'sec': sec}
