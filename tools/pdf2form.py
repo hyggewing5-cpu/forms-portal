@@ -153,20 +153,25 @@ def page_model(pg):
                 if pv is None: pv = atoms[j - 1][2]
                 put(['v', vt, round(pv - x0, 1)], x0, pv); prev = pv; i = j; continue
             if isinstance(ov, tuple):
-                flush(); j = i; vt = ''; pv = None; sx1 = ov[2]
+                flush(); j = i; vt = ''; pv = None; sx1 = ov[2]; szs = []; fx = None
                 while j < len(atoms) and atoms[j][6] == ov:
                     aa = atoms[j]
+                    if not COMB(aa[3]):
+                        szs.append(aa[7])
+                        if fx is None: fx = aa[1]
                     if pv is not None and not COMB(aa[3]) and aa[1] - pv >= 2.0: vt += ' ' * max(1, round((aa[1] - pv) / SP))
                     vt += aa[3]
                     if not COMB(aa[3]): pv = aa[2]
                     j += 1
                 if pv is None: pv = atoms[j - 1][2]
                 left = prev if prev is not None else x0
+                osz = collections.Counter(szs).most_common(1)[0][0] if szs else z
+                meta = {'sz': osz, 'pl': round(max(0, (fx if fx is not None else left) - left), 1)}
                 nxt = atoms[j] if j < len(atoms) else None
                 right = nxt[1] if (nxt and nxt[0] != 'B' and nxt[1] < sx1 + 1) else sx1
                 right = max(right, pv)
-                if MEMO.match(vt.strip()): put(['f', round(pv - left, 1), 'm:' + vt.strip()], left, pv); prev = pv
-                else: put(['f', round(right - left, 1), 'o:' + vt.strip()], left, right); prev = right
+                if MEMO.match(vt.strip()): put(['f', round(pv - left, 1), 'm:' + vt.strip(), meta], left, pv); prev = pv
+                else: put(['f', round(right - left, 1), 'o:' + vt.strip(), meta], left, right); prev = right
                 xmax = max(xmax, prev); i = j; continue
             if k == 'B':
                 flush(); put(['f', round(x1 - x0, 1), 'u'], x0, x1); prev = x1; i += 1; continue
@@ -307,13 +312,14 @@ def build_fields(lines, pref):
             for part, kk in zip(('dn', 'mn', 'y'), (k, k + 2, k + 4)): S(kk).extend([fid, part])
             fields.append({'li': li, 'id': fid, 'type': 'date', 'label': (label_before(k)[-30:] or 'วันที่ลงความเห็น'), 'key': None, 'sec': sec, 'short': True}); k += 5; continue
         if isF(k):
+            meta = sg.pop(3) if len(sg) > 3 and isinstance(sg[3], dict) else {}
             lab = label_before(k); fid = 'f%d' % n; n += 1; sg.append(fid)
             style = sg[2]; L = lab.strip(); nxt = text_after(k); key = None
             if style.startswith('m:'):
                 sg[2] = 'm'; sg.append('memo')
                 kk2 = 'docdate' if ('docdate' not in used and L.endswith('วันที่')) else None
                 if kk2: used.add(kk2)
-                fields.append({'li': li, 'id': fid, 'type': 'date', 'label': L[-30:] or 'วันที่', 'key': kk2, 'sec': sec, 'memo': True}); k += 1; continue
+                fields.append({'li': li, 'id': fid, 'type': 'date', 'label': L[-30:] or 'วันที่', 'key': kk2, 'sec': sec, 'memo': True, **meta}); k += 1; continue
             if (L.endswith('ดิฉัน') or L.endswith('กระผม') or L.endswith('ข้าพเจ้า')) and 'name' not in used and sec == 0: key = 'name'
             if L.endswith('ในปีงบประมาณนี้') and nxt.startswith('ได้ลา'): key = 'name'
             if L.endswith('ประจำปีของ'): key = 'name'
@@ -333,6 +339,7 @@ def build_fields(lines, pref):
                 labtxt = 'ลงชื่อ' + (' ' + nxt[:30] if nxt and 'ลงชื่อ' not in nxt and len(nxt) > 2 and not nxt.startswith('(') else '')
             fld = {'li': li, 'id': fid, 'type': 'text', 'label': labtxt, 'key': key, 'sec': sec}
             if style[:2] in ('d:', 'o:'): fld['def'] = style[2:]; sg[2] = style[0]
+            fld.update(meta)
             fields.append(fld); k += 1; continue
         if sg[0] == 'c':
             fid = 'c%d' % n; n += 1; sg.append(fid)
