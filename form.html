@@ -50,6 +50,7 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .pimg{position:absolute}
 .pk{white-space:pre;flex:none}
 .ln.boxln{align-items:flex-start;line-height:0}
+.cb.dg{display:flex;align-items:center;justify-content:center;line-height:1;font-size:1em}
 .ul{position:absolute;bottom:calc(var(--bb,3px) - .5px);height:0;border-bottom:1.3px dotted #000;pointer-events:none}
 .gh{position:absolute;left:0;bottom:0;width:0;height:1.0973em;line-height:1.0973;visibility:hidden}
 @media (max-width:1050px){.wrap{flex-direction:column;align-items:center}.panel{position:static;max-height:none;width:100%;max-width:640px}}
@@ -142,6 +143,7 @@ function buildSheet(){
         }else if(t==='g'){el=document.createElement('span');el.className='gp';el.style.width=sg[1]+'pt'}
         else if(t==='r'){el=document.createElement('span');el.className='rl';el.style.setProperty('--g',sg[1])}
         else if(t==='k'){el=document.createElement('span');el.className='pk';el.dataset.id=sg[2]||'';el.textContent='( )'}
+        else if(t==='x'){el=document.createElement('span');el.className='cb dg';el.dataset.id=sg[2]||'';el.dataset.i=sg[3];el.style.width=(L.box?L.box.w:16)+'pt';el.style.height=(L.box?L.box.h:16)+'pt';el.style.margin='0'}
         else if(t==='c'){el=document.createElement('span');el.className='cb';el.dataset.id=sg[2]||'';const s=Math.min(Math.max(sg[1],9),18);el.style.width=el.style.height=s+'pt';if(L.box){el.style.width=L.box.w+'pt';el.style.height=L.box.h+'pt';el.style.margin='0'}}
         ln.append(el);
       });
@@ -167,7 +169,9 @@ function fill(){
     el.style.paddingLeft=(el.classList.contains('o')&&f.pl)?f.pl+'pt':'';
   });
   document.querySelectorAll('#pages .cb,#pages .pk').forEach(el=>{
-    const m=fmap[el.dataset.id];if(!m)return;const on=!!vals[vk(m[1],m[0])];
+    const m=fmap[el.dataset.id];if(!m)return;
+    if(el.classList.contains('dg')){el.textContent=thaiV(String(vals[vk(m[1],m[0])]||'').charAt(+el.dataset.i));return}
+    const on=!!vals[vk(m[1],m[0])];
     if(el.classList.contains('pk'))el.textContent=on?'(\u2713)':'( )';else el.classList.toggle('on',on);
   });
   const shs=[...document.querySelectorAll('#pages .sheet')];shs.forEach(s=>s.style.fontSize='16pt'); /* ขนาดอ้างอิง 16 พอยต์ (แต่ละบรรทัดปรับตามต้นฉบับ) */
@@ -211,13 +215,15 @@ function input(f,i,labelText){
   if(f.type==='check'){wrap.className='ck';inp=document.createElement('input');inp.type='checkbox';inp.checked=!!vals[k];
     wrap.append(inp,document.createTextNode(labelText));}
   else{
-    inp=document.createElement('input');inp.type=f.type==='date'?'date':'text';inp.value=vals[k]??f.def??'';
+    inp=document.createElement('input');inp.type=f.type==='date'?'date':'text';
+    if(f.type==='digits'){inp.maxLength=f.n;inp.inputMode='numeric';inp.placeholder='ตัวเลข '+f.n+' หลัก'}inp.value=vals[k]??f.def??'';
     if(k==='days'){inp.type='text';inp.inputMode='numeric'}
     wrap.append(document.createTextNode(labelText),inp);
     if(f.type!=='date'&&f.label.length>16)wrap.classList.add('full');
     if(['name','reason','place'].includes(f.key))wrap.classList.add('full');
   }
   inp.addEventListener('input',()=>{
+    if(f.type==='digits')inp.value=inp.value.replace(/[๐-๙]/g,d=>'๐๑๒๓๔๕๖๗๘๙'.indexOf(d)).replace(/\D/g,'');
     vals[k]=f.type==='check'?inp.checked:inp.value;
     if(k==='days')dirty.days=true;if(k==='go')dirty.go=true;if(k==='back')dirty.back=true;
     fill();syncAuto();savePrefs();

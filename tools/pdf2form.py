@@ -34,6 +34,22 @@ def page_model(pg):
         elif (w >= 19 or h >= 19) and r.get('stroke') and not r.get('fill'):
             add(('r', round(r['x0']), round(r['top']), round(w)), ['r', round(r['x0'], 1), round(r['top'], 1), round(w, 1), round(h, 1)])
     dashed = []
+    # a row of 6+ adjacent boxes = digit boxes (e.g. ID number), not tick boxes
+    boxes.sort(key=lambda b: (b[2], b[0])); rowsb = []
+    for bx in boxes:
+        if rowsb and abs(rowsb[-1][0][2] - bx[2]) <= 2.5: rowsb[-1].append(bx)
+        else: rowsb.append([bx])
+    plain, idruns = [], []
+    for r in rowsb:
+        r.sort(key=lambda b: b[0]); run = [r[0]]; runs = []
+        for bx in r[1:]:
+            if bx[0] - run[-1][1] <= 14: run.append(bx)
+            else: runs.append(run); run = [bx]
+        runs.append(run)
+        for run in runs:
+            if len(run) >= 6: idruns.append(run)
+            else: plain += run
+    boxes = plain
     for l in pg.lines:
         if abs(l['bottom'] - l['top']) < 1 and l.get('dash'): dashed.append([l['x0'], l['x1'], l['top']])
         elif abs(l['bottom'] - l['top']) < 1: add(('h', round(l['x0']), round(l['top'])), ['h', round(l['x0'], 1), round(l['top'], 1), round(l['x1'] - l['x0'], 1)])
@@ -230,6 +246,62 @@ def page_model(pg):
             tgt = next((m for m in made if m['x'] - 2 <= a <= m['x'] + m['w'] + 2), made[0])
             tgt.setdefault('ul', []).append([round(a - tgt['x'], 1), round(b - a, 1)])
         out.extend(made)
+    words = pg.extract_words()
+    for gi, run in enumerate(idruns):
+        cy = (run[0][2] + run[0][3]) / 2
+        lab = 'เลขประจำตัวประชาชน' if any('เลขประจำตัว' in w['text'] and abs((w['top'] + w['bottom']) / 2 - cy) < 9 for w in words) else 'หมายเลข'
+        for i, bx in enumerate(run):
+            w_, h_ = bx[1] - bx[0], bx[3] - bx[2]
+            out.append({'x': round(bx[0], 1), 'y': round(bx[2], 1), 'w': round(w_, 1), 'z': base, 'box': {'w': round(w_, 1), 'h': round(h_, 1)},
+                        's': [['x', round(w_, 1), 'g%d' % gi, i, {'label': lab, 'n': len(run)}]]})
+    hl = [d for d in deco if d[0] == 'h']; vl = [d for d in deco if d[0] == 'v']
+    nums = []
+    for ci in range(len(allc) - 1):
+        c, d = allc[ci], allc[ci + 1]
+        if c['text'] in '๑๒๓๔๕๖๗๘๙' and d['text'] == '.' and d['x0'] - c['x1'] < 3:
+            nums.append(((c['x0'] + d['x1']) / 2, (c['top'] + c['bottom']) / 2, c['text']))
+    def cell_bounds(cx, cy):
+        ha = [q[2] for q in hl if q[2] < cy - 2 and q[1] - 1 <= cx <= q[1] + q[3] + 1]
+        hb = [q[2] for q in hl if q[2] > cy + 2 and q[1] - 1 <= cx <= q[1] + q[3] + 1]
+        if not ha or not hb: return None
+        y0, y1 = max(ha), min(hb)
+        if y1 - y0 > 45: return None
+        xs = sorted(q[1] for q in vl if q[2] - 1 <= cy <= q[2] + q[3] + 1)
+        mx = []
+        for x in xs:
+            if not mx or x - mx[-1] > 1.2: mx.append(x)
+        return y0, y1, mx
+    def colx(mx, cx):
+        for i in range(len(mx) - 1):
+            if mx[i] <= cx <= mx[i + 1]: return i
+        return None
+    def header_text(x0, x1, ytop):
+        near = [c for c in allc if x0 - 2 <= (c['x0'] + c['x1']) / 2 <= x1 + 2 and ytop - 90 < (c['top'] + c['bottom']) / 2 < ytop - 1 and c['text'] not in '.๑๒๓๔๕๖๗๘๙']
+        if not near: return ''
+        yb = max((c['top'] + c['bottom']) / 2 for c in near)
+        return ''.join(c['text'] for c in near if abs((c['top'] + c['bottom']) / 2 - yb) < 5).strip()
+    titles = [w for w in words if 'รถยนต์' in w['text'] or 'รถจักรยานยนต์' in w['text']]
+    for cx, cy, dg in nums:
+        cb_ = cell_bounds(cx, cy)
+        if not cb_: continue
+        y0, y1, mx = cb_; i0 = colx(mx, cx)
+        if i0 is None or mx[i0 + 1] - mx[i0] > 40: continue
+        stop = len(mx) - 1
+        for cx2, cy2, _ in nums:
+            if cx2 > cx and abs(cy2 - cy) < 6:
+                j = colx(mx, cx2)
+                if j is not None: stop = min(stop, j)
+        for k2 in range(i0 + 1, stop):
+            x0, x1 = mx[k2], mx[k2 + 1]
+            if x1 - x0 < 8: continue
+            if any(x0 < (c['x0'] + c['x1']) / 2 < x1 and y0 < (c['top'] + c['bottom']) / 2 < y1 for c in allc): continue
+            side = ''
+            if titles:
+                tw = min(titles, key=lambda w: abs((w['x0'] + w['x1']) / 2 - (x0 + x1) / 2))
+                side = 'รถจักรยานยนต์' if 'จักรยาน' in tw['text'] else 'รถยนต์'
+            lab = (side + ' ' + dg + ' ' + header_text(x0, x1, y0)).replace('  ', ' ').strip()
+            out.append({'x': round(x0 + 1.5, 1), 'y': round((y0 + y1) / 2 - base * 0.55, 1), 'w': round(x1 - x0 - 3, 1), 'z': base,
+                        's': [['f', round(x1 - x0 - 3, 1), 'p', {'label': lab, 'grp': side or 'ตาราง'}]]})
     images = [{'x': round(im['x0'], 1), 'y': round(im['top'], 1), 'w': round(im['width'], 1), 'h': round(im['height'], 1)} for im in pg.images]
     return out, deco, images
 
@@ -287,7 +359,7 @@ def build_fields(lines, pref):
         return 'จำนวนเงินเป็นตัวอักษร'
     toks = [(li, si) for li, l in enumerate(lines) for si, _ in enumerate(l['s'])]
     S = lambda k: lines[toks[k][0]]['s'][toks[k][1]]
-    N = len(toks); fields = []; n = 0; used = set(); dategroups = 0
+    N = len(toks); fields = []; n = 0; used = set(); dategroups = 0; digit_ids = {}
     def label_before(k):
         j = k - 1
         while j >= 0:
@@ -357,6 +429,12 @@ def build_fields(lines, pref):
             if style[:2] in ('d:', 'o:'): fld['def'] = style[2:]; sg[2] = style[0]
             fld.update(meta)
             fields.append(fld); k += 1; continue
+        if sg[0] == 'x':
+            meta = sg.pop(4) if len(sg) > 4 and isinstance(sg[4], dict) else {}
+            if sg[2] not in digit_ids:
+                digit_ids[sg[2]] = 'n%d' % n; n += 1
+                fields.append({'li': li, 'id': digit_ids[sg[2]], 'type': 'digits', 'label': meta.get('label', 'ตัวเลข'), 'key': None, 'sec': sec, 'n': meta.get('n', 13)})
+            sg[2] = digit_ids[sg[2]]; k += 1; continue
         if sg[0] in ('c', 'k'):
             fid = 'c%d' % n; n += 1; sg.append(fid)
             fields.append({'li': li, 'id': fid, 'type': 'check', 'label': (text_after(k)[:60] or label_before(k)[-30:] or 'ช่องทำเครื่องหมาย'), 'key': None, 'sec': sec}); k += 1; continue
@@ -364,9 +442,9 @@ def build_fields(lines, pref):
     for l in lines:
         for sg in l['s']:
             if sg[0] == 'f' and len(sg) >= 4: sg[3] = pref + sg[3]
-            if sg[0] in ('c', 'k') and len(sg) >= 3: sg[2] = pref + sg[2]
+            if sg[0] in ('c', 'k', 'x') and len(sg) >= 3: sg[2] = pref + sg[2]
     for f in fields:
-        f['grp'] = grp_at[f.pop('li')]
+        g0 = grp_at[f.pop('li')]; f['grp'] = f.get('grp') or g0
         f['id'] = pref + f['id']
         f['label'] = re.sub(r'^[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+', '', f['label']).strip()
     return lines, fields
