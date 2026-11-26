@@ -6,6 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>แบบฟอร์มออนไลน์</title>
 <style>
+@font-face{font-family:'TH SarabunIT๙';font-weight:400;src:local('TH SarabunIT๙'),local('THSarabunIT๙'),url('fonts/THSarabunIT9.ttf') format('truetype')}
+@font-face{font-family:'TH SarabunIT๙';font-weight:700;src:local('TH SarabunIT๙ Bold'),local('THSarabunIT๙-Bold'),url('fonts/THSarabunIT9-Bold.ttf') format('truetype')}
 @font-face{font-family:'TH Sarabun PSK';font-weight:400;src:local('TH Sarabun PSK'),local('THSarabunPSK'),local('TH SarabunPSK'),url('fonts/THSarabunPSK.ttf') format('truetype')}
 @font-face{font-family:'TH Sarabun PSK';font-weight:700;src:local('TH Sarabun PSK Bold'),local('THSarabunPSK-Bold'),local('TH SarabunPSK Bold'),url('fonts/THSarabunPSK-Bold.ttf') format('truetype')}
 :root{--ink:#0d2b33;--brand:#0b6e79;--line:#dbe4e7}
@@ -46,6 +48,8 @@ body{margin:0;background:#e9eef0;color:var(--ink);font-family:'TH Sarabun New','
 .cb.on::after{content:'\2713';position:absolute;left:1pt;top:-5pt;font-size:15pt;line-height:1}
 .dc{position:absolute;height:0}.dc.h{border-top:.7pt solid #000}.dc.v{border-left:.7pt solid #000;width:0}.dc.r{border:.75pt solid #000}.dc.d{border-top:1.3px dotted #000}
 .pimg{position:absolute}
+.pk{white-space:pre;flex:none}
+.ln.boxln{align-items:flex-start;line-height:0}
 .ul{position:absolute;bottom:calc(var(--bb,3px) - .5px);height:0;border-bottom:1.3px dotted #000;pointer-events:none}
 .gh{position:absolute;left:0;bottom:0;width:0;height:1.0973em;line-height:1.0973;visibility:hidden}
 @media (max-width:1050px){.wrap{flex-direction:column;align-items:center}.panel{position:static;max-height:none;width:100%;max-width:640px}}
@@ -87,11 +91,12 @@ if(!vals.docdate)vals.docdate=new Date().toLocaleDateString('sv-SE');
 function savePrefs(){try{
   if(vals.remember)localStorage.setItem('formPrefs',JSON.stringify(Object.fromEntries(REM.map(k=>[k,vals[k]||'']))));
   else localStorage.removeItem('formPrefs');}catch(e){}}
-function detectFont(){ /* ตรวจว่าเครื่องมีฟอนต์ TH Sarabun PSK หรือไม่ */
+function detectFont(fam){ /* ตรวจว่าเครื่องมีฟอนต์ของแบบฟอร์มนี้หรือไม่ */
+  fam=fam||'TH Sarabun PSK';
   const s='ทดสอบภาษาไทย ๑๒๓ กขค',c=document.createElement('canvas').getContext('2d');
   c.font='32px monospace';const a=c.measureText(s).width;
-  c.font="32px 'TH Sarabun PSK', monospace";FONT_OK=c.measureText(s).width!==a;
-  $('fontwarn').hidden=FONT_OK;
+  c.font=`32px '${fam}', monospace`;FONT_OK=c.measureText(s).width!==a;
+  $('fontwarn').hidden=FONT_OK;$('fontwarn').textContent='ไม่พบฟอนต์ '+fam+' ในเครื่องนี้ ระบบจึงย่อขนาดตัวอักษรให้พอดี (ไม่ใช่ขนาดตามต้นฉบับ) ติดตั้งฟอนต์แล้วโหลดหน้านี้ใหม่';
 }
 const vk=(fi,f)=>f.key||('f'+fi+'_'+f.id);
 function workDays(a,b,all){
@@ -116,6 +121,7 @@ function buildSheet(){
   const F=FORMS[cur],host=$('pages');host.innerHTML='';
   F.pages.forEach(P=>{
     const sh=document.createElement('div');sh.className='sheet';host.append(sh);
+    if(F.font)sh.style.fontFamily=`'${F.font}','TH Sarabun PSK','TH Sarabun New','Sarabun','Noto Sans Thai','Tahoma',sans-serif`;
     (P.images||[]).forEach(im=>{const g=document.createElement('img');g.className='pimg';g.src=im.src;g.alt='';g.style.cssText=`left:${im.x}pt;top:${im.y}pt;width:${im.w}pt;height:${im.h}pt`;sh.append(g)});
     P.deco.forEach(d=>{const e=document.createElement('div');e.className='dc '+d[0];
       e.style.cssText=d[0]==='r'?`left:${d[1]}pt;top:${d[2]}pt;width:${d[3]}pt;height:${d[4]}pt`:d[0]==='v'?`left:${d[1]}pt;top:${d[2]}pt;height:${d[3]}pt`:`left:${d[1]}pt;top:${d[2]}pt;width:${d[3]}pt`;sh.append(e)});
@@ -123,6 +129,7 @@ function buildSheet(){
       const ln=document.createElement('div');ln.className='ln';
       ln.style.cssText=`left:${L.x}pt;top:${L.y}pt;width:${L.w}pt;font-size:${(L.z/16).toFixed(4)}em`;
       ln.dataset.z=L.z;
+      if(L.box){ln.classList.add('boxln');ln.style.height=L.box.h+'pt';ln.style.width=L.box.w+'pt'}
       L.s.forEach(sg=>{
         const t=sg[0];let el;
         if(t==='t'){
@@ -134,7 +141,8 @@ function buildSheet(){
           el.dataset.id=sg[3]||'';el.dataset.part=sg[4]||'';const v=document.createElement('span');v.className='v';el.append(v,Object.assign(document.createElement('i'),{className:'pb'}));
         }else if(t==='g'){el=document.createElement('span');el.className='gp';el.style.width=sg[1]+'pt'}
         else if(t==='r'){el=document.createElement('span');el.className='rl';el.style.setProperty('--g',sg[1])}
-        else if(t==='c'){el=document.createElement('span');el.className='cb';el.dataset.id=sg[2]||'';const s=Math.min(Math.max(sg[1],9),18);el.style.width=el.style.height=s+'pt'}
+        else if(t==='k'){el=document.createElement('span');el.className='pk';el.dataset.id=sg[2]||'';el.textContent='( )'}
+        else if(t==='c'){el=document.createElement('span');el.className='cb';el.dataset.id=sg[2]||'';const s=Math.min(Math.max(sg[1],9),18);el.style.width=el.style.height=s+'pt';if(L.box){el.style.width=L.box.w+'pt';el.style.height=L.box.h+'pt';el.style.margin='0'}}
         ln.append(el);
       });
       (L.ul||[]).forEach(u=>{const d=document.createElement('div');d.className='ul';d.style.cssText=`left:${u[0]}pt;width:${u[1]}pt`;ln.append(d)});
@@ -158,9 +166,9 @@ function fill(){
     tv.style.fontSize=(f.sz&&Math.abs(f.sz-lz)>0.5)?(f.sz/lz).toFixed(4)+'em':'';
     el.style.paddingLeft=(el.classList.contains('o')&&f.pl)?f.pl+'pt':'';
   });
-  document.querySelectorAll('#pages .cb').forEach(el=>{
-    const m=fmap[el.dataset.id];if(!m)return;
-    el.classList.toggle('on',!!vals[vk(m[1],m[0])]);
+  document.querySelectorAll('#pages .cb,#pages .pk').forEach(el=>{
+    const m=fmap[el.dataset.id];if(!m)return;const on=!!vals[vk(m[1],m[0])];
+    if(el.classList.contains('pk'))el.textContent=on?'(\u2713)':'( )';else el.classList.toggle('on',on);
   });
   const shs=[...document.querySelectorAll('#pages .sheet')];shs.forEach(s=>s.style.fontSize='16pt'); /* ขนาดอ้างอิง 16 พอยต์ (แต่ละบรรทัดปรับตามต้นฉบับ) */
   if(!FONT_OK){ /* ไม่มีฟอนต์ TH Sarabun PSK ในเครื่อง: ย่อทั้งแผ่นเท่ากันเพื่อไม่ให้ข้อความล้น */
@@ -242,19 +250,19 @@ function buildPanel(){
   if(a.length){const g=mk('ข้อมูลอื่นในแบบฟอร์ม');fillG(g,a)}
   if(b.length){const g=mk('ส่วนเจ้าหน้าที่ / ผู้บังคับบัญชา (เว้นว่างไว้ถ้าจะเซ็นด้วยมือ)');fillG(g,b)}
 }
-function show(i){cur=i;dirty={};buildPanel();buildSheet();$('formSel').value=i;
+function show(i){cur=i;dirty={};detectFont(FORMS[i].font);buildPanel();buildSheet();$('formSel').value=i;
   document.title=FORMS[i].title+' | '+(CFG.title||'แบบฟอร์มออนไลน์');
   try{history.replaceState(null,'','?f='+encodeURIComponent(FORMS[i].slug))}catch(e){}}
 FORMS.forEach((f,i)=>$('formSel').add(new Option(f.title,i)));
 $('formSel').onchange=e=>show(+e.target.value);
 $('print').onclick=()=>window.print();
 if(CFG.title)$('ptitle').textContent=CFG.title;
-const start=()=>{detectFont();
+const start=()=>{
   const slug=new URLSearchParams(location.search).get('f');
   const idx=Math.max(0,FORMS.findIndex(f=>f.slug===slug));
   if(!FORMS.length){$('pages').textContent='ไม่พบข้อมูลแบบฟอร์ม (data/forms.js)';return}
   show(idx)};
-if(document.fonts&&document.fonts.load)document.fonts.load("16pt 'TH Sarabun PSK'").catch(()=>{}).finally(start);else start();
+if(document.fonts&&document.fonts.load)Promise.all([document.fonts.load("16pt 'TH Sarabun PSK'"),document.fonts.load("16pt 'TH SarabunIT๙'")]).catch(()=>{}).finally(start);else start();
 </script>
 </body>
 </html>

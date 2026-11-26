@@ -182,7 +182,7 @@ def page_model(pg):
                 put(['c', round(x1 - x0, 1)], x0, x1); prev = x1; i += 1; continue
             if ch in DOTS or ch == '_':
                 j = i; rx1 = x1
-                while j + 1 < len(atoms) and atoms[j + 1][3] == ch and atoms[j + 1][6] is False and atoms[j + 1][1] - rx1 <= 4.6:
+                while j + 1 < len(atoms) and ((atoms[j + 1][3] in DOTS) if ch in DOTS else atoms[j + 1][3] == ch) and atoms[j + 1][6] is False and atoms[j + 1][1] - rx1 <= 4.6:
                     j += 1; rx1 = atoms[j][2]
                 n = j - i + 1
                 if ch == '_':
@@ -236,6 +236,16 @@ def page_model(pg):
 
 def build_fields(lines, pref):
     norm = lambda t: re.sub(r'[.\s]', '', t)
+    def split_parens(segs0):
+        out = []
+        for sg in segs0:
+            if sg[0] == 't' and re.search(r'\(\s?\)', sg[1]):
+                for q in re.split(r'(\(\s?\))', sg[1]):
+                    if not q: continue
+                    out.append(['k', 0] if re.fullmatch(r'\(\s?\)', q) else ['t', q, sg[2], sg[3]])
+            else: out.append(sg)
+        return out
+    for l in lines: l['s'] = split_parens(l['s'])
     for l in lines:
         for sg in l['s']:
             if sg[0] == 't': sg[1] = re.sub(r'พ\.ศ(?!\.)', 'พ.ศ.', sg[1])
@@ -290,7 +300,7 @@ def build_fields(lines, pref):
         while j < N:
             sg = S(j)
             if sg[0] == 't' and norm(sg[1]): return sg[1].strip(' .')
-            if sg[0] in 'fc': return ''
+            if sg[0] in 'fck': return ''
             j += 1
         return ''
     isT = lambda x, w: x < N and S(x)[0] == 't' and norm(S(x)[1]) == w
@@ -347,14 +357,14 @@ def build_fields(lines, pref):
             if style[:2] in ('d:', 'o:'): fld['def'] = style[2:]; sg[2] = style[0]
             fld.update(meta)
             fields.append(fld); k += 1; continue
-        if sg[0] == 'c':
+        if sg[0] in ('c', 'k'):
             fid = 'c%d' % n; n += 1; sg.append(fid)
-            fields.append({'li': li, 'id': fid, 'type': 'check', 'label': text_after(k)[:60] or 'ช่องทำเครื่องหมาย', 'key': None, 'sec': sec}); k += 1; continue
+            fields.append({'li': li, 'id': fid, 'type': 'check', 'label': (text_after(k)[:60] or label_before(k)[-30:] or 'ช่องทำเครื่องหมาย'), 'key': None, 'sec': sec}); k += 1; continue
         k += 1
     for l in lines:
         for sg in l['s']:
             if sg[0] == 'f' and len(sg) >= 4: sg[3] = pref + sg[3]
-            if sg[0] == 'c' and len(sg) >= 3: sg[2] = pref + sg[2]
+            if sg[0] in ('c', 'k') and len(sg) >= 3: sg[2] = pref + sg[2]
     for f in fields:
         f['grp'] = grp_at[f.pop('li')]
         f['id'] = pref + f['id']
@@ -418,10 +428,13 @@ def main():
         n = len(items); items = [f for f in items if f['slug'] != args.slug]; save_data(items); print('ลบแล้ว' if len(items) < n else 'ไม่พบ slug นี้')
     else:
         pages, fields = convert(args.pdf, [int(x) for x in args.pages.split(',')], args.slug)
+        with pdfplumber.open(args.pdf) as _p:
+            fcnt = collections.Counter(c['fontname'].split('+')[-1] for q in [int(x) for x in args.pages.split(',')] for c in _p.pages[q - 1].chars if c['text'] != ' ')
+        fontname = fcnt.most_common(1)[0][0] if fcnt else ''
         ar = sum(len(re.findall(r'[0-9]', sg[1])) for p in pages for l in p['lines'] for sg in l['s'] if sg[0] == 't')
         th = sum(len(re.findall(r'[๐-๙]', sg[1])) for p in pages for l in p['lines'] for sg in l['s'] if sg[0] == 't')
         entry = {'slug': args.slug, 'title': args.title, 'group': args.group, 'desc': args.desc, 'allDays': args.all_days,
-                 'digits': 'ar' if ar > th else 'th', 'pages': pages, 'fields': fields}
+                 'digits': 'ar' if ar > th else 'th', 'font': ('TH SarabunIT๙' if 'IT' in fontname else ''), 'pages': pages, 'fields': fields}
         for i, f in enumerate(items):
             if f['slug'] == args.slug: items[i] = entry; break
         else: items.append(entry)
